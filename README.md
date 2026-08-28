@@ -49,13 +49,16 @@ stops as soon as any one of these is true:
    that layer (a safety ceiling, not a target).
 2. **Coverage met** — every field the layer owns is either citable and
    populated, or genuinely attempted and honestly marked `unknown`.
-3. **Diminishing returns** — the last 3 consecutive fetches for that layer
-   added no new citable fact.
-4. **High-priority sources exhausted** — it has worked through the layer's
+3. **High-priority sources exhausted** — it has worked through the layer's
    listed source types (trust center, docs, GitHub org, careers page,
    etc.) before resorting to secondary/community sources.
 
-Conditions 2 and 4 are checked against a fixed **coverage checklist** —
+There is no early "diminishing returns" exit — a layer keeps going until
+it hits the hard budget, is fully covered, or exhausts its high-priority
+source list, so it won't bail out of a layer just because a few fetches in
+a row came up empty.
+
+Conditions 2 and 3 are checked against a fixed **coverage checklist** —
 for each layer, the exact fields it owns and the source types to try for
 them:
 

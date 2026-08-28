@@ -97,18 +97,13 @@ instead. Move to a layer as soon as ANY of these is true for it:
 2. COVERAGE MET: per the COVERAGE CHECKLIST above, every field this layer
    owns is either citable and populated, or honestly "unknown" after a
    genuine attempt — not just unattempted.
-3. DIMINISHING RETURNS: your last 3 consecutive fetches for this layer
-   added no new citable fact to it. Don't keep pulling the same thread —
-   move to the next layer.
-4. HIGH-PRIORITY SOURCES EXHAUSTED: per the COVERAGE CHECKLIST above,
+3. HIGH-PRIORITY SOURCES EXHAUSTED: per the COVERAGE CHECKLIST above,
    you've worked through this layer's listed source types before spending
    its budget on secondary/community sources.
 
-Do not stop on a layer before condition 2 is met just because condition 3
-looks close — a fast run of empty fetches early on isn't the same as
-having tried the high-priority sources. Conversely, don't keep searching
-a layer past condition 1 just because it still says "unknown" — that
-layer's budget always wins; move on and let it stay partly unknown.
+Don't keep searching a layer past condition 1 just because it still says
+"unknown" — that layer's budget always wins; move on and let it stay
+partly unknown.
 
 Once every layer has individually hit a stop condition, the whole
 Collector run is done — write the final profile.
