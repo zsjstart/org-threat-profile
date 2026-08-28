@@ -33,3 +33,65 @@ and domain.
 The analyst produces flagged observations only — no severity scoring,
 ranking, or remediation advice. That judgment is left to whoever consumes
 the output.
+
+## How the two agents work
+
+### org-collector
+
+Tools: `WebSearch`, `WebFetch`. This agent does open-ended research, so it
+needs a stopping rule or it could search indefinitely. It tracks budget and
+coverage **per layer** (business_operations, technologies, infrastructure,
+ai_ml, security — security covers five YAML sections: identity_and_access,
+compliance, security_controls, supply_chain, incidents). For each layer it
+stops as soon as any one of these is true:
+
+1. **Hard budget** — 6 `WebSearch` calls or 20 `WebFetch` calls spent on
+   that layer (a safety ceiling, not a target).
+2. **Coverage met** — every field the layer owns is either citable and
+   populated, or genuinely attempted and honestly marked `unknown`.
+3. **Diminishing returns** — the last 3 consecutive fetches for that layer
+   added no new citable fact.
+4. **High-priority sources exhausted** — it has worked through the layer's
+   listed source types (trust center, docs, GitHub org, careers page,
+   etc.) before resorting to secondary/community sources.
+
+Every populated value is marked `(stated)` (a fetched source explicitly
+asserts it) or `(inferred)` (derived via conservative, industry-standard
+inference, never invented) and carries `[Sx]` citation tags resolved in a
+trailing "Source key" block. It never draws risk conclusions itself — that
+is left entirely to the analyst — and it only profiles the organization,
+never enriches named individuals beyond a public role+name.
+
+### org-analyst
+
+Tools: none (only `Read`, unused in practice — it exists only in case the
+profile arrives as a file path instead of inline text). This agent has no
+web access; it reasons only over the profile text it's given in the
+prompt, in a single pass — there's no search loop, so it needs no budget
+or stopping criteria the way the collector does.
+
+It scans the profile through **7 fixed risk lenses** (its `category`
+enum): `external_attack_surface`, `identity_and_access_exposure`,
+`supply_chain_dependency`, `compliance_gap_signal`, `incident_recurrence`,
+`ai_supply_chain_exposure`, `data_exposure_signal`, plus a catch-all
+`other`. For each lens it looks at the profile fields that lens maps to
+and, where it finds material, emits an indicator that does one of three
+things:
+
+1. **Direct read** — a single `(stated)` field is itself the risk signal
+   (e.g. an incident's attack vector, taken as-is).
+2. **Cross-reference** — two fields from different sections are compared
+   to surface a gap or tension the profile never states outright (e.g.
+   comparing `compliance.certifications` against `incidents[]` to note
+   that certification didn't prevent the disclosed incident).
+3. **Structural inference** — breadth or architecture implies exposure
+   (e.g. many identity providers or subprocessors implying a wider attack
+   surface), always tagged `inferred_evidence` with a caveat that scale
+   alone isn't proof of a weakness.
+
+Every indicator must trace to specific `basis_fields` and `[Sx]` citations
+already in the input profile — no new facts, no exploitability claims, no
+attacker attribution, no invented attack chains, no CVE unless the profile
+itself cited one. If a lens has no supporting material in the profile, it
+is simply omitted rather than forced — an empty result is valid. Final
+output is strict JSON only, no prose.
