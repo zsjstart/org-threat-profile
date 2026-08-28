@@ -59,11 +59,11 @@ them:
 
 | Layer | Fields it owns | Source types to try |
 |---|---|---|
-| `business_operations` | industry, products, notable_customers, headcount, funding_financials, locations, org_structure, leadership, hiring_signals, partnerships | homepage/about page, investor relations or public filings, press/news coverage, Wikipedia, careers page, leadership/about page |
-| `technologies` | cloud_providers, languages_frameworks, databases, security_tools | engineering blog, developer/API docs, changelogs, GitHub org/repos, job postings |
-| `infrastructure` | hosting_model, architecture_patterns, cdn_and_edge, regions_or_geography, data_residency | engineering blog (architecture posts), docs, trust center, status page |
-| `ai_ml` | ai_features, model_providers, inference_hosting, ai_governance, ai_supply_chain | product/pricing pages, AI or responsible-AI pages, model cards, integration pages, engineering blog |
-| `security` (one layer, five YAML sections: identity_and_access, compliance, security_controls, supply_chain, incidents) | auth_methods, sso_support, mfa, certifications, regulated_data_types, network, data_protection, testing_and_assurance, subprocessors, notable_dependencies, incidents[] | trust center, security/compliance pages, legal/DPA/subprocessor pages, KB/help-center SSO or MFA docs, incident disclosures, third-party incident writeups, security-vendor or news coverage of incidents |
+| `business_operations` | Industry, products, notable customers, headcount, funding & financials, locations, org structure, leadership, hiring signals, partnerships | homepage/about page, investor relations or public filings, press/news coverage, Wikipedia, careers page, leadership/about page |
+| `technologies` | Cloud providers, languages & frameworks, databases, security tools | engineering blog, developer/API docs, changelogs, GitHub org/repos, job postings |
+| `infrastructure` | Hosting model, architecture patterns, CDN & edge, regions/geography, data residency | engineering blog (architecture posts), docs, trust center, status page |
+| `ai_ml` | AI features, model providers, inference hosting, AI governance, AI supply chain | product/pricing pages, AI or responsible-AI pages, model cards, integration pages, engineering blog |
+| `security` (one layer, output split across 5 YAML sections) | **Identity & access:** auth methods, SSO support, MFA<br>**Compliance:** certifications, regulated data types<br>**Security controls:** network, data protection, testing & assurance<br>**Supply chain:** subprocessors, notable dependencies<br>**Incidents:** incident records | trust center, security/compliance pages, legal/DPA/subprocessor pages, KB/help-center SSO or MFA docs, incident disclosures, third-party incident writeups, security-vendor or news coverage of incidents |
 
 A layer counts as covered (condition 2) only once *every* field in its row
 has either a citable value or a genuine attempt against its listed source
