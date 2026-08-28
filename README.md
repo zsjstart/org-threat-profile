@@ -55,6 +55,25 @@ stops as soon as any one of these is true:
    listed source types (trust center, docs, GitHub org, careers page,
    etc.) before resorting to secondary/community sources.
 
+Conditions 2 and 4 are checked against a fixed **coverage checklist** —
+for each layer, the exact fields it owns and the source types to try for
+them:
+
+| Layer | Fields it owns | Source types to try |
+|---|---|---|
+| `business_operations` | industry, products, notable_customers, headcount, funding_financials, locations, org_structure, leadership, hiring_signals, partnerships | homepage/about page, investor relations or public filings, press/news coverage, Wikipedia, careers page, leadership/about page |
+| `technologies` | cloud_providers, languages_frameworks, databases, security_tools | engineering blog, developer/API docs, changelogs, GitHub org/repos, job postings |
+| `infrastructure` | hosting_model, architecture_patterns, cdn_and_edge, regions_or_geography, data_residency | engineering blog (architecture posts), docs, trust center, status page |
+| `ai_ml` | ai_features, model_providers, inference_hosting, ai_governance, ai_supply_chain | product/pricing pages, AI or responsible-AI pages, model cards, integration pages, engineering blog |
+| `security` (one layer, five YAML sections: identity_and_access, compliance, security_controls, supply_chain, incidents) | auth_methods, sso_support, mfa, certifications, regulated_data_types, network, data_protection, testing_and_assurance, subprocessors, notable_dependencies, incidents[] | trust center, security/compliance pages, legal/DPA/subprocessor pages, KB/help-center SSO or MFA docs, incident disclosures, third-party incident writeups, security-vendor or news coverage of incidents |
+
+A layer counts as covered (condition 2) only once *every* field in its row
+has either a citable value or a genuine attempt against its listed source
+types came up empty — checking just one source type before giving up on a
+field doesn't count. "High-priority sources exhausted" (condition 4) means
+the layer's listed source types have been worked through, not that every
+possible page of that type has been read.
+
 Every populated value is marked `(stated)` (a fetched source explicitly
 asserts it) or `(inferred)` (derived via conservative, industry-standard
 inference, never invented) and carries `[Sx]` citation tags resolved in a
