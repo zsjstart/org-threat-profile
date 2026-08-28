@@ -68,7 +68,7 @@ them:
 A layer counts as covered (condition 2) only once *every* field in its row
 has either a citable value or a genuine attempt against its listed source
 types came up empty — checking just one source type before giving up on a
-field doesn't count. "High-priority sources exhausted" (condition 4) means
+field doesn't count. "High-priority sources exhausted" (condition 3) means
 the layer's listed source types have been worked through, not that every
 possible page of that type has been read.
 
