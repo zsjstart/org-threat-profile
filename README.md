@@ -53,11 +53,6 @@ stops as soon as any one of these is true:
    listed source types (trust center, docs, GitHub org, careers page,
    etc.) before resorting to secondary/community sources.
 
-There is no early "diminishing returns" exit — a layer keeps going until
-it hits the hard budget, is fully covered, or exhausts its high-priority
-source list, so it won't bail out of a layer just because a few fetches in
-a row came up empty.
-
 Conditions 2 and 3 are checked against a fixed **coverage checklist** —
 for each layer, the exact fields it owns and the source types to try for
 them:
