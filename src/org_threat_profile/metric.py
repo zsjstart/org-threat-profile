@@ -6,6 +6,7 @@ from typing import NamedTuple
 from urllib.parse import urljoin
 
 import ddgs
+import ddgs.exceptions
 import numpy as np
 import pptx.shapes.autoshape
 import pymupdf
@@ -112,7 +113,7 @@ def process_output(model_output_file: str) -> ProcessedOutput:
                     source = source_match.group(1)
                     title = line[line.find("]") + 1 : line.find("(")].strip()
                     urls = [
-                        url.replace(")", "") for url in URLExtract().find_urls(line)
+                        url.replace(")", "") for url in URLExtract().find_urls(line) if isinstance(url, str)
                     ]
                     used_sources[source] = Source(title=title, urls=urls)
 
@@ -313,12 +314,12 @@ def fact_gathering_score(
     return Score(value=score_value, total=total_facts)
 
 
-def search_score(topic: str, key: str, fact_content: str) -> float:
+def search_score(topic: str, key: str, fact_content: str, t: int = 3, k: int = 10) -> float:
     try:
         searcher = ddgs.DDGS()
         results = searcher.text(
             query=f"{topic} {key} {fact_content}",
-            max_results=10,
+            max_results=k,
             safesearch="off",
             region="wt-wt",
         )
@@ -327,7 +328,7 @@ def search_score(topic: str, key: str, fact_content: str) -> float:
             search_contents = get_website_contents(result["href"])
             search_scores.append(direct_score(fact_content, search_contents))
         search_scores.sort()
-        return np.mean(search_scores[:-3])
+        return np.mean(search_scores[:-t]).item()
     except ddgs.exceptions.DDGSException:
         return 0.0
 
