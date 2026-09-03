@@ -1,0 +1,41 @@
+[project]
+name = "org-threat-profile"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "", email = "" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "bs4>=0.0.2",
+    "ddgs>=9.16.0",
+    "markdownify>=1.2.3",
+    "numpy>=2.5.2",
+    "pillow>=12.3.0",
+    "pymupdf>=1.28.2",
+    "pymupdf4llm>=1.28.2",
+    "pytesseract>=0.3.13",
+    "python-docx>=1.2.0",
+    "python-pptx>=1.0.2",
+    "requests>=2.34.2",
+    "thefuzz>=0.22.1",
+    "tldextract>=5.3.2",
+    "urlextract>=1.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "isort>=6.0.1",
+    "pyright>=1.1.400",
+    "pytest>=8.3.5",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.11.8",
+]
+
+[project.scripts]
+org-threat-profile = "org_threat_profile:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
