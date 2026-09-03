@@ -113,7 +113,9 @@ def process_output(model_output_file: str) -> ProcessedOutput:
                     source = source_match.group(1)
                     title = line[line.find("]") + 1 : line.find("(")].strip()
                     urls = [
-                        url.replace(")", "") for url in URLExtract().find_urls(line) if isinstance(url, str)
+                        url.replace(")", "")
+                        for url in URLExtract().find_urls(line)
+                        if isinstance(url, str)
                     ]
                     used_sources[source] = Source(title=title, urls=urls)
 
@@ -314,7 +316,9 @@ def fact_gathering_score(
     return Score(value=score_value, total=total_facts)
 
 
-def search_score(topic: str, key: str, fact_content: str, t: int = 3, k: int = 10) -> float:
+def search_score(
+    topic: str, key: str, fact_content: str, t: int = 3, k: int = 10
+) -> float:
     try:
         searcher = ddgs.DDGS()
         results = searcher.text(
