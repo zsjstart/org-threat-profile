@@ -19,8 +19,8 @@ from docx import Document as WordDocument
 from markdownify import markdownify
 from PIL import Image
 from pptx import Presentation as PowerPointPresentation
-from scipy.spatial.distance import cosine
 from sentence_transformers import SentenceTransformer
+from sentence_transformers.util import cos_sim
 from thefuzz import fuzz
 from tqdm import tqdm
 from urlextract import URLExtract
@@ -116,7 +116,9 @@ def process_output(model_output_file: str) -> ProcessedOutput:
                     source = source_match.group(1)
                     title = line[line.find("]") + 1 : line.find("(")].strip()
                     urls = [
-                        url.replace(")", "") for url in URLExtract().find_urls(line) if isinstance(url, str)
+                        url.replace(")", "")
+                        for url in URLExtract().find_urls(line)
+                        if isinstance(url, str)
                     ]
                     used_sources[source] = SourceLocation(title=title, urls=urls)
 
@@ -255,7 +257,9 @@ def get_website_contents(url: str) -> WebsiteContents | FailedRequest:
         return FailedRequest.Failed
 
 
-def perform_exact_search(title: str, limit: int = 10) -> tuple[str, list[str]] | FailedRequest:
+def perform_exact_search(
+    title: str, limit: int = 10
+) -> tuple[str, list[str]] | FailedRequest:
     try:
         matching_contents = ""
         matching_content_types = []
@@ -322,7 +326,7 @@ def recursive_text_splitter(
         for i, sep in enumerate(separators):
             if sep == "" or sep in text:
                 separator = sep
-                remaining = separators[i + 1:]
+                remaining = separators[i + 1 :]
                 break
 
         # Split into smaller pieces.
@@ -393,7 +397,7 @@ def recursive_text_splitter(
         # Extremely long piece: hard split as a safety measure.
         if len(current) > chunk_size:
             chunks.append(current[:chunk_size])
-            current = current[chunk_size - chunk_overlap:]
+            current = current[chunk_size - chunk_overlap :]
 
     if current:
         chunks.append(current)
@@ -406,14 +410,17 @@ class SourceContent(NamedTuple):
     urls: list[str]
     content: str
     content_types: list[str]
-    chunks: list[str]
+    chunks: np.typing.NDArray
 
 
 class FailedSource(Enum):
     Failed = auto()
 
 
-def crawl_sources(sources: dict[str, SourceLocation]) -> dict[str, SourceContent | FailedSource]:
+def crawl_sources(
+    embedding_model: SentenceTransformer,
+    sources: dict[str, SourceLocation],
+) -> dict[str, SourceContent | FailedSource]:
     all_source_content = {}
     for source_name, source in sources.items():
         source_content = ""
@@ -437,7 +444,7 @@ def crawl_sources(sources: dict[str, SourceLocation]) -> dict[str, SourceContent
                 urls=source.urls,
                 content=source_content.lower(),
                 content_types=source_types,
-                chunks=recursive_text_splitter(source_content.lower()),
+                chunks=embedding_model.encode(recursive_text_splitter(source_content.lower())),
             )
     return all_source_content
 
@@ -447,20 +454,26 @@ class Score(NamedTuple):
     total: int
 
 
-def direct_score(embedding_model: SentenceTransformer, fact_content: str, source: SourceContent) -> float:
+def direct_score(
+    embedding_model: SentenceTransformer,
+    fact_content: str,
+    source: SourceContent,
+) -> float:
     if fact_content in source.content:
         return 1.0
 
     # Split source and get max sim
-    embeddings = embedding_model.encode([fact_content] + source.chunks)
-    fact_emb = embeddings[0] / np.linalg.norm(embeddings[0])
-    sc_embs = embeddings[1:] / np.linalg.norm(embeddings[1:], axis=1, keepdims=True)
-    score = np.max(sc_embs @ fact_emb).item()
-    return score
+    if len(source.chunks) > 0:
+        fact_emb = embedding_model.encode([fact_content])
+        score = cos_sim(fact_emb, source.chunks).max().item()
+        return score
+    return 0.0
 
 
-def fact_gathering_score(
-    embedding_model: SentenceTransformer, model_output: ProcessedOutput, sources: dict[str, SourceContent | FailedSource]
+def stated_fact_score(
+    embedding_model: SentenceTransformer,
+    model_output: ProcessedOutput,
+    sources: dict[str, SourceContent | FailedSource],
 ) -> Score:
     score_value = 0.0
     total_facts = 0
@@ -504,16 +517,20 @@ def search_score(
                     urls=[result["href"]],
                     content=search_contents,
                     content_types=[website_contents.content_type],
-                    chunks=recursive_text_splitter(search_contents),
+                    chunks=embedding_model.encode(recursive_text_splitter(search_contents)),
                 )
-                search_scores.append(direct_score(embedding_model, fact_content, source))
+                search_scores.append(
+                    direct_score(embedding_model, fact_content, source)
+                )
         search_scores.sort()
-        return np.mean(search_scores[:-t]).item()
+        if len(search_scores) > 0:
+            return np.mean(search_scores[:-t]).item()
+        return 0.0
     except ddgs.exceptions.DDGSException:
         return 0.0
 
 
-def inference_score(
+def inferred_fact_score(
     embedding_model: SentenceTransformer,
     topic: str,
     model_output: ProcessedOutput,
@@ -531,7 +548,9 @@ def inference_score(
         for fact in fact_list:
             fact_content = fact.content.lower()
             direct_score_value = direct_score(embedding_model, fact_content, source)
-            search_score_value = search_score(embedding_model, topic, fact.key.lower(), fact_content)
+            search_score_value = search_score(
+                embedding_model, topic, fact.key.lower(), fact_content
+            )
             score_value += max(direct_score_value, search_score_value)
 
     return Score(value=score_value, total=total_facts)
@@ -566,25 +585,32 @@ def source_variety_score(sources: dict[str, SourceContent | FailedSource]) -> Sc
                 source_score = 1.0
             elif any(ct not in used_sources[top_domain] for ct in source.content_types):
                 source_score = max(source_score, 0.5)
-            used_sources[top_domain] = used_sources.get(top_domain, set()) | set(source.content_types)
+            used_sources[top_domain] = used_sources.get(top_domain, set()) | set(
+                source.content_types
+            )
         score += source_score
 
     return Score(value=score, total=total_sources)
 
 
-def score_output(embedding_model: SentenceTransformer, topic: str, model_output_file: str) -> dict[str, Score]:
+def score_output(
+    embedding_model: SentenceTransformer, topic: str, model_output_file: str
+) -> dict[str, Score]:
     model_output = process_output(model_output_file)
-    sources = crawl_sources(model_output.sources)
+    sources = crawl_sources(embedding_model, model_output.sources)
     return {
-        "fact_gathering": fact_gathering_score(embedding_model, model_output, sources),
-        "inference": inference_score(embedding_model, topic, model_output, sources),
+        "stated_fact_score": stated_fact_score(embedding_model, model_output, sources),
+        "inferred_fact_score": inferred_fact_score(
+            embedding_model, topic, model_output, sources
+        ),
         "hallucinated_sources": hallucinated_score(sources),
-        "source_variety": source_variety_score(sources),
+        "source_variety_score": source_variety_score(sources),
     }
 
 
 def score_all_outputs(topic: str, output_folder: str) -> dict[str, dict[str, Score]]:
-    embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    embedding_model = SentenceTransformer("sentence-transformers/static-retrieval-mrl-en-v1")
+    # embedding_model = SentenceTransformer("Qwen/Qwen3-Embedding-8B")
     scores = {}
     for output_file in (pbar := tqdm(glob.glob(f"{output_folder}/*.yaml"))):
         pbar.set_description_str(f"Processing {output_file}")
