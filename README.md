@@ -112,3 +112,22 @@ attacker attribution, no invented attack chains, no CVE unless the profile
 itself cited one. If a lens has no supporting material in the profile, it
 is simply omitted rather than forced — an empty result is valid. Final
 output is strict JSON only, no prose.
+
+
+## Scoring Metric
+
+We also provide a script to score model outputs according to the approximate accuracy of stated and inferred facts. It is located in `src/`.
+
+
+### Setup
+
+1. Install [uv](https://docs.astral.sh/uv/)
+2. For OCR processing install [tesseract](https://tesseractocr.org/)
+3. Run `uv sync` from within this repo's folders
+4. Place the outputs from various agents into a yaml files named after the agent id, and place in a folder of your choice
+
+### Running the script
+
+Run `uv run org-threat-profile <topic> <output_folder>` replacing `<topic>` with the topic/organisation that the agent analysed, and `<output_folder>` with the path to the folder containing the agent output yaml files.
+
+The script will output the results and write them to the `results.csv` csv file.
