@@ -19,7 +19,10 @@ from docx import Document as WordDocument
 from markdownify import markdownify
 from PIL import Image
 from pptx import Presentation as PowerPointPresentation
+from scipy.spatial.distance import cosine
+from sentence_transformers import SentenceTransformer
 from thefuzz import fuzz
+from tqdm import tqdm
 from urlextract import URLExtract
 
 
@@ -55,7 +58,7 @@ class Fact(NamedTuple):
     content: str
 
 
-class Source(NamedTuple):
+class SourceLocation(NamedTuple):
     title: str
     urls: list[str]
 
@@ -63,7 +66,7 @@ class Source(NamedTuple):
 class ProcessedOutput(NamedTuple):
     stated_facts: dict[str, list[Fact]]
     inferred_facts: dict[str, list[Fact]]
-    sources: dict[str, Source]
+    sources: dict[str, SourceLocation]
 
 
 def process_output(model_output_file: str) -> ProcessedOutput:
@@ -115,7 +118,7 @@ def process_output(model_output_file: str) -> ProcessedOutput:
                     urls = [
                         url.replace(")", "") for url in URLExtract().find_urls(line) if isinstance(url, str)
                     ]
-                    used_sources[source] = Source(title=title, urls=urls)
+                    used_sources[source] = SourceLocation(title=title, urls=urls)
 
     return ProcessedOutput(
         stated_facts=stated_facts, inferred_facts=inferred_facts, sources=used_sources
@@ -204,7 +207,16 @@ def pp_presentation_to_md(ppp_content: bytes) -> str:
     return "\n\n".join(slides)
 
 
-def get_website_contents(url: str) -> str:
+class WebsiteContents(NamedTuple):
+    content_type: str
+    contents: str
+
+
+class FailedRequest(Enum):
+    Failed = auto()
+
+
+def get_website_contents(url: str) -> WebsiteContents | FailedRequest:
     """
     Get the raw html of the website specified by the url.
 
@@ -225,25 +237,28 @@ def get_website_contents(url: str) -> str:
         )
         match content_type:
             case "application/pdf":
-                return pdf_to_markdown(response.content)
+                contents = pdf_to_markdown(response.content)
             case "text/html":
-                return html_to_markdown(response.text, url)
+                contents = html_to_markdown(response.text, url)
             case s if s.startswith("image"):
-                return image_to_text(response.content)
+                contents = image_to_text(response.content)
             case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                return word_doc_to_text(response.content)
+                contents = word_doc_to_text(response.content)
             case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-                return pp_presentation_to_md(response.content)
+                contents = pp_presentation_to_md(response.content)
             case _:
-                return response.text
+                contents = response.text
+
+        return WebsiteContents(content_type=content_type, contents=contents)
 
     except Exception:  # noqa: BLE001
-        return ""
+        return FailedRequest.Failed
 
 
-def perform_exact_search(title: str, limit: int = 10) -> str:
+def perform_exact_search(title: str, limit: int = 10) -> tuple[str, list[str]] | FailedRequest:
     try:
         matching_contents = ""
+        matching_content_types = []
         searcher = ddgs.DDGS()
         results = searcher.text(
             query=title,
@@ -256,30 +271,174 @@ def perform_exact_search(title: str, limit: int = 10) -> str:
                 title.lower() in result["title"].lower()
                 or title.lower() in result["body"]
             ):
-                matching_contents += get_website_contents(result["href"])
-        return matching_contents
+                website_contents = get_website_contents(result["href"])
+                if website_contents is not FailedRequest.Failed:
+                    matching_contents += website_contents.contents
+                    matching_content_types.append(website_contents.content_type)
+        return matching_contents, matching_content_types
     except ddgs.exceptions.DDGSException:
-        return ""
+        return FailedRequest.Failed
+
+
+def recursive_text_splitter(
+    text: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    separators: list[str] | None = None,
+) -> list[str]:
+    """
+    Lightweight alternative to LangChain's RecursiveCharacterTextSplitter.
+
+    Splitting priority:
+        1. paragraph: "\n\n"
+        2. line:      "\n"
+        3. space:     " "
+        4. character: ""
+
+    Args:
+        text: Input text.
+        chunk_size: Maximum chunk length.
+        chunk_overlap: Number of characters shared between chunks.
+        separators: Custom separators, from coarse to fine.
+
+    Returns:
+        List of text chunks.
+    """
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be smaller than chunk_size")
+
+    if separators is None:
+        separators = ["\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ", ""]
+
+    def split_recursive(text: str, separators: list[str]) -> list[str]:
+        # Already small enough.
+        if len(text) <= chunk_size:
+            return [text]
+
+        # Find the first separator that actually occurs.
+        separator = separators[-1]
+        remaining = []
+
+        for i, sep in enumerate(separators):
+            if sep == "" or sep in text:
+                separator = sep
+                remaining = separators[i + 1:]
+                break
+
+        # Split into smaller pieces.
+        if separator:
+            pieces = text.split(separator)
+        else:
+            pieces = list(text)
+
+        chunks = []
+        current = []
+
+        def flush():
+            if current:
+                chunks.append(separator.join(current))
+                current.clear()
+
+        for piece in pieces:
+            if not piece:
+                continue
+
+            candidate = separator.join(current + [piece])
+
+            if len(candidate) <= chunk_size:
+                current.append(piece)
+                continue
+
+            # Current chunk is ready.
+            flush()
+
+            # This individual piece is still too large.
+            if len(piece) > chunk_size and remaining:
+                chunks.extend(split_recursive(piece, remaining))
+            else:
+                current.append(piece)
+
+        flush()
+
+        return chunks
+
+    # First recursively split the document.
+    pieces = split_recursive(text, separators)
+
+    # Merge pieces while maintaining overlap.
+    chunks = []
+    current = ""
+
+    for piece in pieces:
+        if not current:
+            current = piece
+            continue
+
+        candidate = current + "\n" + piece
+
+        if len(candidate) <= chunk_size:
+            current = candidate
+            continue
+
+        chunks.append(current)
+
+        # Keep the tail of the previous chunk as overlap.
+        overlap = current[-chunk_overlap:]
+
+        # Avoid starting the next chunk with whitespace.
+        overlap = overlap.lstrip()
+
+        current = overlap + "\n" + piece
+
+        # Extremely long piece: hard split as a safety measure.
+        if len(current) > chunk_size:
+            chunks.append(current[:chunk_size])
+            current = current[chunk_size - chunk_overlap:]
+
+    if current:
+        chunks.append(current)
+
+    return [chunk.strip() for chunk in chunks if chunk.strip()]
+
+
+class SourceContent(NamedTuple):
+    title: str
+    urls: list[str]
+    content: str
+    content_types: list[str]
+    chunks: list[str]
 
 
 class FailedSource(Enum):
     Failed = auto()
 
 
-def crawl_sources(sources: dict[str, Source]) -> dict[str, str | FailedSource]:
+def crawl_sources(sources: dict[str, SourceLocation]) -> dict[str, SourceContent | FailedSource]:
     all_source_content = {}
     for source_name, source in sources.items():
         source_content = ""
+        source_types = []
         if source.urls:
             for url in source.urls:
-                source_content += get_website_contents(url)
+                website_contents = get_website_contents(url)
+                if website_contents is not FailedRequest.Failed:
+                    source_content += website_contents.contents
+                    source_types.append(website_contents.content_type)
         else:
-            source_content = perform_exact_search(source.title)
+            exact_search_results = perform_exact_search(source.title)
+            if exact_search_results is not FailedRequest.Failed:
+                source_content, source_types = exact_search_results
 
         if len(source_content) == 0:
             all_source_content[source_name] = FailedSource.Failed
         else:
-            all_source_content[source_name] = source_content
+            all_source_content[source_name] = SourceContent(
+                title=source.title,
+                urls=source.urls,
+                content=source_content.lower(),
+                content_types=source_types,
+                chunks=recursive_text_splitter(source_content.lower()),
+            )
     return all_source_content
 
 
@@ -288,14 +447,20 @@ class Score(NamedTuple):
     total: int
 
 
-def direct_score(fact_content: str, source_content: str) -> float:
-    if fact_content in source_content:
+def direct_score(embedding_model: SentenceTransformer, fact_content: str, source: SourceContent) -> float:
+    if fact_content in source.content:
         return 1.0
-    return fuzz.partial_ratio(fact_content, source_content) / 100
+
+    # Split source and get max sim
+    embeddings = embedding_model.encode([fact_content] + source.chunks)
+    fact_emb = embeddings[0] / np.linalg.norm(embeddings[0])
+    sc_embs = embeddings[1:] / np.linalg.norm(embeddings[1:], axis=1, keepdims=True)
+    score = np.max(sc_embs @ fact_emb).item()
+    return score
 
 
 def fact_gathering_score(
-    model_output: ProcessedOutput, sources: dict[str, str | FailedSource]
+    embedding_model: SentenceTransformer, model_output: ProcessedOutput, sources: dict[str, SourceContent | FailedSource]
 ) -> Score:
     score_value = 0.0
     total_facts = 0
@@ -306,15 +471,21 @@ def fact_gathering_score(
         if source is FailedSource.Failed:
             continue
 
-        source = source.lower()
         for fact in fact_list:
             fact_content = fact.content.lower()
-            score_value += direct_score(fact_content, source)
+            score_value += direct_score(embedding_model, fact_content, source)
 
     return Score(value=score_value, total=total_facts)
 
 
-def search_score(topic: str, key: str, fact_content: str, t: int = 3, k: int = 10) -> float:
+def search_score(
+    embedding_model: SentenceTransformer,
+    topic: str,
+    key: str,
+    fact_content: str,
+    t: int = 3,
+    k: int = 10,
+) -> float:
     try:
         searcher = ddgs.DDGS()
         results = searcher.text(
@@ -325,8 +496,17 @@ def search_score(topic: str, key: str, fact_content: str, t: int = 3, k: int = 1
         )
         search_scores = []
         for result in results:
-            search_contents = get_website_contents(result["href"])
-            search_scores.append(direct_score(fact_content, search_contents))
+            website_contents = get_website_contents(result["href"])
+            if website_contents is not FailedRequest.Failed:
+                search_contents = website_contents.contents
+                source = SourceContent(
+                    title=result["title"],
+                    urls=[result["href"]],
+                    content=search_contents,
+                    content_types=[website_contents.content_type],
+                    chunks=recursive_text_splitter(search_contents),
+                )
+                search_scores.append(direct_score(embedding_model, fact_content, source))
         search_scores.sort()
         return np.mean(search_scores[:-t]).item()
     except ddgs.exceptions.DDGSException:
@@ -334,7 +514,10 @@ def search_score(topic: str, key: str, fact_content: str, t: int = 3, k: int = 1
 
 
 def inference_score(
-    topic: str, model_output: ProcessedOutput, sources: dict[str, str | FailedSource]
+    embedding_model: SentenceTransformer,
+    topic: str,
+    model_output: ProcessedOutput,
+    sources: dict[str, SourceContent | FailedSource],
 ) -> Score:
     score_value = 0.0
     total_facts = 0
@@ -345,40 +528,67 @@ def inference_score(
         if source is FailedSource.Failed:
             continue
 
-        source = source.lower()
         for fact in fact_list:
             fact_content = fact.content.lower()
-            direct_score_value = direct_score(fact_content, source)
-            search_score_value = search_score(topic, fact.key.lower(), fact_content)
+            direct_score_value = direct_score(embedding_model, fact_content, source)
+            search_score_value = search_score(embedding_model, topic, fact.key.lower(), fact_content)
             score_value += max(direct_score_value, search_score_value)
 
     return Score(value=score_value, total=total_facts)
 
 
-def hallucinated_score(sources: dict[str, str | FailedSource]) -> Score:
+def hallucinated_score(sources: dict[str, SourceContent | FailedSource]) -> Score:
     """Find the number of sources that are hallucinated"""
-    score_value = float(len(sources))
+    score_value = 0.0
     total_sources = len(sources)
     for source_content in sources.values():
         if source_content is FailedSource.Failed:
-            score_value -= 1
+            score_value += 1
     return Score(value=score_value, total=total_sources)
 
 
-def score_output(topic: str, model_output_file: str) -> dict[str, Score]:
+def source_variety_score(sources: dict[str, SourceContent | FailedSource]) -> Score:
+    """
+    Measure the number of sources taken from unique locations,
+    half points for sources that are different media type from the same location
+    """
+    total_sources = len(sources)
+    used_sources: dict[str, set[str]] = {}  # source top level name -> content type
+    score = 0.0
+    for source in sources.values():
+        if source is FailedSource.Failed:
+            continue
+
+        source_score = 0.0
+        for url in source.urls:
+            top_domain = tldextract.extract(url).top_domain_under_public_suffix
+            if used_sources.get(top_domain) is None:
+                source_score = 1.0
+            elif any(ct not in used_sources[top_domain] for ct in source.content_types):
+                source_score = max(source_score, 0.5)
+            used_sources[top_domain] = used_sources.get(top_domain, set()) | set(source.content_types)
+        score += source_score
+
+    return Score(value=score, total=total_sources)
+
+
+def score_output(embedding_model: SentenceTransformer, topic: str, model_output_file: str) -> dict[str, Score]:
     model_output = process_output(model_output_file)
     sources = crawl_sources(model_output.sources)
     return {
-        "fact_gathering": fact_gathering_score(model_output, sources),
-        "inference": inference_score(topic, model_output, sources),
-        "hallucinated": hallucinated_score(sources),
+        "fact_gathering": fact_gathering_score(embedding_model, model_output, sources),
+        "inference": inference_score(embedding_model, topic, model_output, sources),
+        "hallucinated_sources": hallucinated_score(sources),
+        "source_variety": source_variety_score(sources),
     }
 
 
 def score_all_outputs(topic: str, output_folder: str) -> dict[str, dict[str, Score]]:
+    embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     scores = {}
-    for output_file in glob.glob(f"{output_folder}/*.yaml"):
+    for output_file in (pbar := tqdm(glob.glob(f"{output_folder}/*.yaml"))):
+        pbar.set_description_str(f"Processing {output_file}")
         scores[output_file[output_file.rfind("/") + 1 : output_file.rfind(".")]] = (
-            score_output(topic, output_file)
+            score_output(embedding_model, topic, output_file)
         )
     return scores
