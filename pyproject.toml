@@ -31,6 +31,7 @@ dev = [
     "pyright>=1.1.400",
     "pytest>=8.3.5",
     "pytest-cov>=7.1.0",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.11.8",
 ]
 
@@ -40,3 +41,7 @@ org-threat-profile = "org_threat_profile:main"
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
