@@ -1,14 +1,20 @@
 # org-threat-profile
 
-A Claude Code skill that builds a cited organizational profile and
-evidence-linked risk indicators for a named organization, using two
-subagents:
+A Claude Code skill that builds a cited organizational profile,
+evidence-linked risk indicators, and an attacker-oriented attack-surface map
+for a named organization, using three subagents:
 
 - **org-collector** — gathers publicly available information across five
   layers (business/operational, technology, infrastructure, AI/ML,
   security) into a cited, stated/inferred-marked YAML profile.
 - **org-analyst** — turns that profile into evidence-linked risk
   indicators (JSON), without collecting any new facts.
+- **org-surface-mapper** — turns that same profile into an attacker-oriented
+  attack-surface map (JSON): entry points classified by reachability/trust
+  boundary, plus attack paths chaining entry points together (historical
+  paths reconstructed from a documented incident, structural paths inferred
+  from stated architecture/identity relationships), without collecting any
+  new facts or inventing exploit mechanics.
 
 ## Use case
 
@@ -29,10 +35,16 @@ and domain.
 - `<domain>_risk_indicators.json` — evidence-linked risk indicators, each
   tagged with category, evidence basis (stated/inferred/absence), source
   fields, citations, and caveats
+- `<domain>_attack_surface.json` — the attack-surface map: `entry_points`
+  (classified by `reachable_by` and `trust_boundary`) and `attack_paths`
+  (`historical`, from a documented incident, or `structural`, from stated
+  architecture/identity relationships), each with evidence basis, source
+  fields, citations, and caveats
+- `<domain>_attack_surface_profile.md` — a human-readable rendering of the
+  JSON above (formatting only, no added facts)
 
-The analyst produces flagged observations only — no severity scoring,
-ranking, or remediation advice. That judgment is left to whoever consumes
-the output.
+Neither the analyst nor the mapper produces severity scoring, ranking, or
+remediation advice. That judgment is left to whoever consumes the output.
 
 ## How the two agents work
 
@@ -112,3 +124,39 @@ attacker attribution, no invented attack chains, no CVE unless the profile
 itself cited one. If a lens has no supporting material in the profile, it
 is simply omitted rather than forced — an empty result is valid. Final
 output is strict JSON only, no prose.
+
+### org-surface-mapper
+
+Tools: none (same `Read`-only setup as the analyst; no web access, single
+pass, no budget/stopping criteria). It takes the same profile text as the
+analyst but asks a different question — not "what's risky" but "what can an
+attacker reach, from where, and what does reaching it let them reach next."
+An inventory of technologies/products isn't an attack-surface analysis on
+its own; this agent adds the reachability and chaining structure that turns
+one into the other.
+
+It works in two parts:
+
+1. **Entry points** — every product, infrastructure component, identity
+   mechanism, third-party integration, AI/ML component, and known incident
+   vector the profile supports, each tagged with `reachable_by`
+   (`unauthenticated_internet` / `authenticated_customer` / `employee_only`
+   / `partner_or_subprocessor` / `unknown`) and a `trust_boundary` phrase
+   naming what crosses from where to where.
+2. **Attack paths** — chains connecting entry points, of exactly two kinds:
+   - `historical`: reconstructed strictly from a documented incident already
+     in `incidents[]`, tracking its own stated sequence with no added
+     steps. Always `stated_evidence`.
+   - `structural`: connects entry points via a relationship the profile
+     states or industry-standard-infers (e.g. account access implies
+     deployment-config access, because the profile states the platform
+     grants that). Always `inferred_evidence`, always caveated that this
+     describes reachability/topology, not a proven or attempted exploit.
+
+It is barred from a third kind of path, from describing exploitation
+mechanics or payloads, from naming a CVE the profile doesn't cite, and from
+assigning severity/priority labels — same evidence-linking and
+no-invented-facts discipline as the analyst, aimed at topology instead of
+risk framing. Final output is strict JSON only, no prose; the skill then
+formats it into a human-readable `<domain>_attack_surface_profile.md`
+without adding anything beyond that JSON.
